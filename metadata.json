@@ -1,0 +1,6 @@
+{
+  "name": "Meridian Career Agent",
+  "description": "AI-powered career management workspace that aggregates and prioritizes daily job opportunities from LinkedIn, Indeed, and Glassdoor based on skills and salary preferences, with integrated cover letter drafting and automated application tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
