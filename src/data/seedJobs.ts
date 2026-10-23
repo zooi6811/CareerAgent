@@ -2,8 +2,50 @@ import {
   ApplicationRecord,
   CandidateProfile,
   ConsultantChatMessage,
+  ConsultationBlueprint,
   JobListing,
 } from '../types/career';
+
+export const EMPTY_BLUEPRINT: ConsultationBlueprint = {
+  corePassions: [],
+  targetLocations: [],
+  maxCommuteMinutes: 30,
+  workEnvironment: '',
+  workLifeBalancePriority: '',
+  jobSecurityPriority: '',
+  progressionGoal: '',
+  compensationExpectation: '',
+  minSalaryK: 0,
+  preferredWorkModes: ['Remote', 'Hybrid'],
+  recommendedRoles: [],
+  consultantSummary: '',
+  extractedSuperpowers: [],
+  idealCompanyDNA: '',
+  dreamJobDefinition: '',
+};
+
+export const EMPTY_CANDIDATE_PROFILE: CandidateProfile = {
+  fullName: '',
+  headline: '',
+  yearsExperience: 0,
+  skills: [],
+  targetRoles: [],
+  minSalaryK: 0,
+  preferredWorkModes: ['Remote', 'Hybrid'],
+  preferredLocations: [],
+  bioSummary: '',
+  keyAchievements: [],
+  baseResumeText: '',
+  baseResumeFileName: '',
+  linkedInUrl: '',
+  linkedInSummary: '',
+  consultationBlueprint: EMPTY_BLUEPRINT,
+};
+
+export const EMPTY_CONSULTANT_MESSAGES: ConsultantChatMessage[] = [];
+
+export const EMPTY_JOB_FEED: JobListing[] = [];
+export const EMPTY_APPLICATIONS: Record<string, ApplicationRecord> = {};
 
 export const DEFAULT_BASE_RESUME = `JORDAN VANCE
 San Francisco, CA (Open to Remote & Hybrid) · jordan.vance@meridiancareer.io · github.com/jordanvance
@@ -25,7 +67,7 @@ export const DEFAULT_LINKEDIN_SUMMARY = `Headline: Senior Full-Stack & AI System
 Featured Posts & Endorsements: Top endorsed for TypeScript (48), Distributed Systems (39), LLM Orchestration (31), React (44), PostgreSQL (29).
 About: Passionate about zero-to-one product engineering where distributed systems rigor meets intuitive human-in-the-loop AI interfaces. Seeking a high-autonomy Staff/Principal role at an engineering-led organization where I can own core agentic infrastructure while maintaining sustainable work-life balance.`;
 
-export const INITIAL_CONSULTANT_MESSAGES: ConsultantChatMessage[] = [
+export const DEMO_CONSULTANT_MESSAGES: ConsultantChatMessage[] = [
   {
     id: 'consult-1',
     role: 'consultant',
@@ -46,7 +88,7 @@ export const INITIAL_CONSULTANT_MESSAGES: ConsultantChatMessage[] = [
   },
 ];
 
-export const DEFAULT_CANDIDATE_PROFILE: CandidateProfile = {
+export const DEMO_CANDIDATE_PROFILE: CandidateProfile = {
   fullName: 'Jordan Vance',
   headline: 'Senior Full-Stack & AI Systems Engineer',
   yearsExperience: 7,
@@ -121,7 +163,7 @@ export const DEFAULT_CANDIDATE_PROFILE: CandidateProfile = {
   },
 };
 
-export const INITIAL_JOB_FEED: JobListing[] = [
+export const DEMO_JOB_FEED: JobListing[] = [
   {
     id: 'li-901',
     title: 'Staff AI Product Engineer, Agent Workflows',
@@ -380,7 +422,7 @@ export const INITIAL_JOB_FEED: JobListing[] = [
   },
 ];
 
-export const INITIAL_APPLICATIONS: Record<string, ApplicationRecord> = {
+export const DEMO_APPLICATIONS: Record<string, ApplicationRecord> = {
   'li-901': {
     jobId: 'li-901',
     status: 'Saved',
@@ -394,9 +436,6 @@ Target Role: Staff AI Product Engineer, Agent Workflows at Veridian Labs · Loca
 
 EXECUTIVE SUMMARY (TAILORED FOR VERIDIAN LABS)
 7+ years architecting production systems in TypeScript, React, Node.js, LLM Orchestration, Distributed Systems, PostgreSQL, Python. Specifically aligned with Veridian Labs's Autonomous Workflows mandate: scaling enterprise agent orchestration runtimes and streaming React execution canvases.
-
-WHY VERIDIAN LABS WILL LOVE HAVING YOU ON THE TEAM
-• Veridian’s VP of Engineering is specifically looking for a Staff IC who has already scaled a real-time LLM synthesis pipeline above 100k daily users with sub-500ms latency—making your Horizon Cloud achievement an immediate, rare plug-and-play fit.
 
 ROLE-ALIGNED TECHNICAL COMPETENCIES
 • Primary Match for Veridian Labs: TypeScript · React · Node.js · LLM Orchestration · Distributed Systems · PostgreSQL · Python
@@ -425,14 +464,11 @@ Jordan Vance`,
   },
   'gd-402': {
     jobId: 'gd-402',
-    status: 'Applied',
+    status: 'Saved',
     updatedAt: '2026-10-19T16:15:00Z',
-    appliedAt: 'Oct 19, 2026',
-    nextStep: 'Recruiter screen scheduled for Oct 23 at 2:00 PM EST',
-    notes: 'Auto-Apply Agent submitted tailored resume + cover letter package.',
+    nextStep: 'Review the demo role and prepare an application package',
+    notes: 'Demo sample only. No application was submitted.',
     autoTrackedByAgent: true,
-    autoAppliedByAgent: true,
-    confirmationId: 'MCA-APPLY-88412',
   },
   'ind-715': {
     jobId: 'ind-715',

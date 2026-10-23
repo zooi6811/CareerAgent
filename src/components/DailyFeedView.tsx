@@ -36,6 +36,7 @@ interface DailyFeedViewProps {
   onRunCustomScan: (customQuery: string) => Promise<void>;
   isScanning: boolean;
   lastScanHeadline: string;
+  partialResults?: { message: string; text: string; sources: Array<{ title: string; uri: string }> } | null;
   onAutoTrackTopMatches: () => number;
   chatMessages: CoverLetterMessage[];
   onSendInlineCoverLetterPrompt: (
@@ -43,6 +44,8 @@ interface DailyFeedViewProps {
     instruction: string
   ) => Promise<string | undefined>;
   isGeneratingLetter: boolean;
+  lastSessionSummary?: string;
+  returningUser?: boolean;
 }
 
 const WORK_MODE_OPTIONS: ('All' | WorkMode)[] = [
@@ -74,9 +77,12 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
   onRunCustomScan,
   isScanning,
   lastScanHeadline,
+  partialResults = null,
   onAutoTrackTopMatches,
   onSendInlineCoverLetterPrompt,
   isGeneratingLetter,
+  lastSessionSummary = '',
+  returningUser = false,
 }) => {
   const [scanInput, setScanInput] = useState<string>('');
   const [inlineChatInput, setInlineChatInput] = useState<string>('');
@@ -119,6 +125,7 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
 
   return (
     <div className="max-w-[1380px] mx-auto px-6 py-6">
+      {returningUser && <div className="mb-4 flex flex-col gap-1 rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-semibold text-indigo-950">Welcome back{profile.fullName ? `, ${profile.fullName.split(' ')[0]}` : ''}</p><p className="mt-0.5 text-xs text-indigo-900">{lastSessionSummary || 'Your profile, preferences, applications, and previous conversations are saved on this device.'}</p></div><span className="text-[10px] text-indigo-700">Your previous work is ready</span></div>}
       {/* Agent Executive Digest Bar */}
       <div className="p-5 mb-6 bg-white border border-slate-200 rounded-lg">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
@@ -162,6 +169,13 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
             </button>
           </div>
         </div>
+
+        {partialResults && <section aria-label="Partial job search results" className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <h2 className="text-sm font-semibold text-amber-950">Partial results are ready</h2>
+          <p className="mt-1 text-xs text-amber-900">{partialResults.message}</p>
+          {partialResults.sources.length > 0 && <ul className="mt-3 space-y-1">{partialResults.sources.map((source) => <li key={source.uri} className="text-xs"><a href={source.uri} target="_blank" rel="noreferrer" className="font-medium text-blue-800 underline">{source.title || source.uri}</a></li>)}</ul>}
+          {partialResults.text && <details className="mt-3"><summary className="cursor-pointer text-xs font-semibold text-amber-950">Show raw search findings</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-white/80 p-3 text-xs text-slate-700">{partialResults.text}</pre></details>}
+        </section>}
 
         {/* Agent Live Scan Input */}
         <form
@@ -380,10 +394,14 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
       {filteredJobs.length === 0 ? (
         <div className="p-12 text-center bg-white border border-slate-200 rounded-lg">
           <h2 className="text-base font-semibold text-slate-900 mb-1">
-            No listings match your active filter combination
+            {allScoredJobs.length === 0
+              ? 'No verified postings yet'
+              : 'No listings match your active filter combination'}
           </h2>
           <p className="text-xs text-slate-500 max-w-md mx-auto mb-4">
-            Try relaxing your minimum salary threshold or switching Work Mode back to All Modes.
+            {allScoredJobs.length === 0
+              ? 'Broaden your search: add more target roles, include more locations, or leave work mode as All. Every listing must open a real LinkedIn, Indeed, or Glassdoor URL.'
+              : 'Try relaxing your minimum salary threshold or switching Work Mode back to All Modes. Roles with unlisted salary stay visible.'}
           </p>
           <button
             type="button"
@@ -483,7 +501,7 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
                       </span>
                     </h2>
                     <span className="text-sm font-bold text-slate-900 font-mono tabular-nums whitespace-nowrap shrink-0">
-                      {formatSalaryRange(job.salaryMinK, job.salaryMaxK)}
+                      {formatSalaryRange(job.salaryMinK, job.salaryMaxK, job.salaryCurrency || profile.salaryCurrency)}
                     </span>
                   </div>
 
@@ -491,16 +509,6 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
                   <p className="text-xs text-slate-600 leading-relaxed mb-2">
                     {job.agentSummary}
                   </p>
-
-                  {/* Why Company Will Love Having You on Their Team */}
-                  {job.whyCompanyLovesYou && (
-                    <p className="text-xs text-emerald-900 bg-emerald-50/70 border border-emerald-200/80 rounded px-2.5 py-1.5 mb-2 leading-relaxed">
-                      <span className="font-semibold">
-                        Why {job.company} Will Love You:
-                      </span>{' '}
-                      {job.whyCompanyLovesYou}
-                    </p>
-                  )}
 
                   {/* Holistic CareerHub Fit Indicators (Unboxed inline text) */}
                   {(job.workLifeBalanceNote || job.securityAndProgressionNote) && (
@@ -543,29 +551,34 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
                         Tailor Resume & Cover Letter
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onUpdateApplicationStatus(
-                            job.id,
-                            isTracked && appRec.status === 'Saved'
-                              ? 'Applied'
-                              : 'Saved'
-                          )
-                        }
-                        aria-label={
-                          isTracked
-                            ? `Advance tracking stage for ${job.company}`
-                            : `Save ${job.title} at ${job.company} to tracker`
-                        }
-                        className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
-                          isTracked
-                            ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
-                            : 'bg-slate-900 text-white hover:bg-slate-800'
-                        }`}
-                      >
-                        {isTracked ? `Stage: ${appRec.status}` : 'Save & Track'}
-                      </button>
+                      {(!isTracked || appRec.status === 'Saved') && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onUpdateApplicationStatus(
+                              job.id,
+                              appRec?.status === 'Saved' ? 'Untracked' : 'Saved'
+                            )
+                          }
+                          aria-label={
+                            appRec?.status === 'Saved'
+                              ? `Unsave ${job.title} at ${job.company}`
+                              : `Save ${job.title} at ${job.company} to tracker`
+                          }
+                          className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                            appRec?.status === 'Saved'
+                              ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
+                              : 'bg-slate-900 text-white hover:bg-slate-800'
+                          }`}
+                        >
+                          {appRec?.status === 'Saved' ? 'Saved' : 'Save & Track'}
+                        </button>
+                      )}
+                      {isTracked && appRec.status !== 'Saved' && (
+                        <span className="px-3 py-1.5 text-xs font-semibold rounded-md bg-emerald-50 text-emerald-900 border border-emerald-200">
+                          Stage: {appRec.status}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </article>
@@ -601,7 +614,8 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
                   <span className="font-mono tabular-nums font-bold text-slate-900 text-sm">
                     {formatSalaryRange(
                       activeJob.salaryMinK,
-                      activeJob.salaryMaxK
+                      activeJob.salaryMaxK,
+                      activeJob.salaryCurrency || profile.salaryCurrency
                     )}{' '}
                     {activeJob.equity ? `· ${activeJob.equity}` : ''}
                   </span>
@@ -655,19 +669,11 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
                   </div>
                 </div>
 
-                {activeJob.whyCompanyLovesYou && (
-                  <div className="mt-2.5 p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-md">
-                    <div className="text-[11px] font-semibold text-emerald-900">
-                      Why {activeJob.company} Will Love Having You on Their Team
-                    </div>
-                    <p className="text-xs text-emerald-950 mt-0.5 leading-relaxed">
-                      {activeJob.whyCompanyLovesYou}
-                    </p>
-                  </div>
-                )}
-
                 <p className="text-xs text-slate-600 mt-2.5 leading-relaxed">
-                  {activeJob.whyItMatches}
+                  {activeJob.match.matchedSkills.length
+                    ? `Your profile lists ${activeJob.match.matchedSkills.join(', ')} among the posting skills.`
+                    : 'No exact skills overlap was found in your current profile.'}
+                  {activeJob.match.missingSkills.length > 0 && ` Gaps: ${activeJob.match.missingSkills.slice(0, 5).join(', ')}.`}
                 </p>
               </div>
 
@@ -685,23 +691,26 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
                 </ul>
               </div>
 
-              {/* Multi-Agent Tailor & Auto-Apply Action Box */}
+              {/* Multi-Agent Tailor & Application Preparation */}
               <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-2.5">
                 <div className="text-xs font-semibold text-slate-900">
                   Multi-Agent Application Pipeline
                 </div>
                 <p className="text-xs text-slate-600 leading-relaxed">
                   Launch the <strong>Resume Tailoring Agent</strong> (from{' '}
-                  <span className="font-mono">{profile.baseResumeFileName}</span>)
-                  and <strong>Cover Letter Agent</strong>, then confirm the{' '}
-                  <strong>Auto-Apply Agent</strong>.
+                  <span className="font-mono">
+                    {profile.baseResumeFileName || 'your uploaded resume'}
+                  </span>
+                  ) and <strong>Cover Letter Agent</strong>, then prepare the
+                  package and open the real posting. Meridian does not submit
+                  applications for you.
                 </p>
                 <button
                   type="button"
                   onClick={() => onOpenCoverLetterStudio(activeJob.id)}
                   className="w-full py-2 px-3 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors"
                 >
-                  Open Tailor & Auto-Apply Studio for {activeJob.company}
+                  Open Tailor & Prepare Studio for {activeJob.company}
                 </button>
               </div>
 

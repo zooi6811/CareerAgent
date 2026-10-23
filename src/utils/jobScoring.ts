@@ -7,87 +7,52 @@ import {
   JobMatchBreakdown,
   ScoredJobListing,
 } from '../types/career';
+export { formatSalaryRange } from './localePreferences';
 
 export function normalizeSkill(skill: string): string {
-  return skill.trim().toLowerCase();
+  return skill
+    .trim()
+    .toLowerCase()
+    .replace(/[+#]+$/g, '')
+    .replace(/\s+/g, ' ');
 }
 
-export const KNOWN_TECH_SKILLS = [
-  'TypeScript',
-  'React',
-  'Node.js',
-  'Python',
-  'Distributed Systems',
-  'PostgreSQL',
-  'LLM Orchestration',
-  'GraphQL',
-  'Docker',
-  'Kubernetes',
-  'Rust',
-  'Go',
-  'PyTorch',
-  'Next.js',
-  'AWS',
-  'GCP',
-  'Kafka',
-  'Redis',
-  'Terraform',
-];
+const SKILL_ALIASES: Record<string, string> = {
+  ts: 'typescript',
+  typescript: 'typescript',
+  js: 'javascript',
+  javascript: 'javascript',
+  'node': 'node.js',
+  nodejs: 'node.js',
+  'node.js': 'node.js',
+  react: 'react',
+  reactjs: 'react',
+  'react.js': 'react',
+  golang: 'go',
+  go: 'go',
+  k8s: 'kubernetes',
+  kubernetes: 'kubernetes',
+  postgres: 'postgresql',
+  postgresql: 'postgresql',
+  py: 'python',
+  python: 'python',
+  'next': 'next.js',
+  nextjs: 'next.js',
+  'next.js': 'next.js',
+  gcp: 'gcp',
+  'google cloud': 'gcp',
+  aws: 'aws',
+  rust: 'rust',
+  django: 'django',
+};
 
-export function extractResumeAndLinkedInSignals(
-  resumeText: string,
-  linkedInSummary: string,
-  currentProfile: CandidateProfile
-): {
-  detectedSkills: string[];
-  extractedSuperpowers: string[];
-  idealCompanyDNA: string;
-  dreamJobDefinition: string;
-  recommendedRoles: string[];
-} {
-  const combined = `${resumeText} ${linkedInSummary}`.toLowerCase();
+export function canonicalSkill(skill: string): string {
+  const normalized = normalizeSkill(skill);
+  return SKILL_ALIASES[normalized] || normalized;
+}
 
-  const detectedSkills = Array.from(
-    new Set([
-      ...currentProfile.skills,
-      ...KNOWN_TECH_SKILLS.filter((skill) =>
-        combined.includes(skill.toLowerCase())
-      ),
-    ])
-  );
-
-  const extractedSuperpowers: string[] = [
-    '0-to-1 AI Agent & Distributed Systems Architecture (p95 < 450ms at 140k+ daily users)',
-    'Full-Stack Product Ownership (React/TypeScript interfaces + Node.js/Python runtimes)',
-    'High-ROI Infrastructure Optimization (34% cloud spend reduction via event-driven PostgreSQL)',
-  ];
-
-  if (combined.includes('mentor') || combined.includes('lead')) {
-    extractedSuperpowers.push(
-      'Cross-Timezone Technical Mentorship & Engineering Reliability Leadership'
-    );
-  }
-
-  const idealCompanyDNA =
-    'Engineering-led Series B–D or profitable AI/platform company where Staff/Principal ICs partner directly with founders and product leadership, ship without bureaucratic friction, and are valued for end-to-end architectural ownership.';
-
-  const dreamJobDefinition =
-    'Principal or Staff AI Systems & Product Architect role with 100% Remote or low-commute Hybrid flexibility, $195k–$255k+ base + equity, high psychological safety, and a mandate to build human-centered autonomous workflows.';
-
-  const recommendedRoles = [
-    'Staff AI Product Engineer',
-    'Principal Full-Stack Systems Architect',
-    'Lead Autonomous Systems Engineer',
-    'Founding AI Platform Engineer',
-  ];
-
-  return {
-    detectedSkills,
-    extractedSuperpowers,
-    idealCompanyDNA,
-    dreamJobDefinition,
-    recommendedRoles,
-  };
+export function skillsMatch(candidateSkill: string, jobSkill: string): boolean {
+  return canonicalSkill(candidateSkill) === canonicalSkill(jobSkill);
 }
 
 export function applyBlueprintToProfile(
@@ -100,7 +65,11 @@ export function applyBlueprintToProfile(
 
   return {
     ...profile,
-    minSalaryK: blueprint.minSalaryK || profile.minSalaryK,
+    minSalaryK: blueprint.minSalaryK ?? profile.minSalaryK,
+    preferredCountry: blueprint.preferredCountry ?? profile.preferredCountry,
+    homeLocation: blueprint.homeLocation ?? profile.homeLocation,
+    salaryCurrency: blueprint.salaryCurrency ?? profile.salaryCurrency,
+    timeZone: blueprint.timeZone ?? profile.timeZone,
     preferredWorkModes:
       blueprint.preferredWorkModes.length > 0
         ? blueprint.preferredWorkModes
@@ -112,6 +81,10 @@ export function applyBlueprintToProfile(
     targetRoles: mergedRoles,
     consultationBlueprint: {
       ...blueprint,
+      preferredCountry: blueprint.preferredCountry ?? profile.preferredCountry,
+      homeLocation: blueprint.homeLocation ?? profile.homeLocation,
+      salaryCurrency: blueprint.salaryCurrency ?? profile.salaryCurrency,
+      timeZone: blueprint.timeZone ?? profile.timeZone,
       lastCompletedAt: new Date().toISOString(),
     },
   };
@@ -128,31 +101,37 @@ export function generateTailoredResumeText(
       : profile.skills.slice(0, 6);
   const additionalSkills = profile.skills.filter((s) => !matched.includes(s));
 
-  return `${profile.fullName.toUpperCase()}
-${profile.headline} · LinkedIn: ${profile.linkedInUrl || 'linkedin.com/in/jordan-vance-ai'}
-Target Role: ${job.title} at ${job.company} · Locations: ${profile.preferredLocations.join(' | ')} (${job.workMode} Ready)
+  const displayName = (profile.fullName || 'Candidate').toUpperCase();
+  const linkedIn = profile.linkedInUrl ? ` · LinkedIn: ${profile.linkedInUrl}` : '';
+  const locations =
+    profile.preferredLocations.length > 0
+      ? profile.preferredLocations.join(' | ')
+      : 'Not specified';
+  const passions =
+    bp?.corePassions?.filter(Boolean).slice(0, 2).join(' and ') || '';
+  const achievements =
+    profile.keyAchievements.length > 0
+      ? profile.keyAchievements.map((ach) => `• ${ach}`).join('\n')
+      : '• See base resume for experience details.';
+
+  return `${displayName}
+${profile.headline || ''}${linkedIn}
+Target Role: ${job.title} at ${job.company} · Locations: ${locations} (${job.workMode})
 
 EXECUTIVE SUMMARY (TAILORED FOR ${job.company.toUpperCase()})
-${profile.yearsExperience}+ years architecting production systems in ${matched.join(', ')}. Specifically aligned with ${job.company}'s ${job.department} mandate: ${job.agentSummary} Driven by core focus in ${bp?.corePassions?.slice(0, 2).join(' and ') || 'autonomous AI systems and resilient distributed infrastructure'}.
-
-WHY ${job.company.toUpperCase()} WILL LOVE HAVING YOU ON THE TEAM
-• ${job.whyCompanyLovesYou || `Direct track record solving ${job.company}'s exact scaling and product velocity challenges in ${matched.slice(0, 3).join(', ')}.`}
+${profile.yearsExperience > 0 ? `${profile.yearsExperience}+ years. ` : ''}${
+    matched.length > 0 ? `Relevant skills: ${matched.join(', ')}. ` : ''
+  }${job.agentSummary || ''}${passions ? ` Focus areas: ${passions}.` : ''}
 
 ROLE-ALIGNED TECHNICAL COMPETENCIES
-• Primary Match for ${job.company}: ${matched.join(' · ')}
-• Additional Stack & Tooling: ${additionalSkills.join(' · ') || 'System Design · CI/CD · Observability'}
+• Overlap with this posting: ${matched.join(' · ') || 'See base resume'}
+• Additional skills: ${additionalSkills.join(' · ') || 'See base resume'}
 
-SELECTED QUANTIFIED IMPACT & EXPERIENCE
-${profile.keyAchievements.map((ach) => `• ${ach}`).join('\n')}
-• Direct Role Alignment (${job.title}): Prepared to immediately ${
-    job.keyResponsibilities[0]
-      ? job.keyResponsibilities[0].charAt(0).toLowerCase() +
-        job.keyResponsibilities[0].slice(1)
-      : 'lead core architecture and end-to-end product delivery.'
-  }
+SELECTED IMPACT
+${achievements}
 
-BASE RESUME FOUNDATION (${profile.baseResumeFileName || 'Uploaded Resume'})
-${profile.baseResumeText.trim()}`;
+BASE RESUME (${profile.baseResumeFileName || 'Uploaded Resume'})
+${(profile.baseResumeText || '').trim()}`;
 }
 
 export function calculateJobMatch(
@@ -169,9 +148,8 @@ export function calculateJobMatch(
   const missingSkills: string[] = [];
 
   for (const skill of allJobSkills) {
-    const norm = normalizeSkill(skill);
-    const isMatched = Array.from(candidateSkillsSet).some(
-      (cs) => cs === norm || cs.includes(norm) || norm.includes(cs)
+    const isMatched = Array.from(candidateSkillsSet).some((cs) =>
+      skillsMatch(cs, skill)
     );
     if (isMatched) {
       matchedSkills.push(skill);
@@ -192,12 +170,27 @@ export function calculateJobMatch(
 
   const skillScore = Math.round((requiredRatio * 0.75 + totalRatio * 0.25) * 100);
 
-  const salaryMidpoint = (job.salaryMinK + job.salaryMaxK) / 2;
-  const salaryDeltaK = Math.round(job.salaryMaxK - profile.minSalaryK);
+  const salaryUnknown = job.salaryMaxK === 0 && job.salaryMinK === 0;
+  const salaryMidpoint = salaryUnknown
+    ? 0
+    : (job.salaryMinK + job.salaryMaxK) / 2;
+  const salaryDeltaK = salaryUnknown
+    ? 0
+    : Math.round(job.salaryMaxK - profile.minSalaryK);
   let salaryScore = 100;
 
-  if (job.salaryMaxK >= profile.minSalaryK && salaryMidpoint >= profile.minSalaryK) {
-    const bonus = Math.min(10, Math.round((salaryMidpoint - profile.minSalaryK) / 5));
+  if (salaryUnknown) {
+    salaryScore = 70;
+  } else if (profile.minSalaryK <= 0) {
+    salaryScore = 80;
+  } else if (
+    job.salaryMaxK >= profile.minSalaryK &&
+    salaryMidpoint >= profile.minSalaryK
+  ) {
+    const bonus = Math.min(
+      10,
+      Math.round((salaryMidpoint - profile.minSalaryK) / 5)
+    );
     salaryScore = Math.min(100, 92 + Math.max(0, bonus));
   } else if (job.salaryMaxK >= profile.minSalaryK) {
     salaryScore = 84;
@@ -232,9 +225,14 @@ export function calculateJobMatch(
   );
 
   const roleBonus = (matchesTargetRole ? 4 : 0) + (matchesPassion ? 3 : 0);
+  const commuteScore = scoreCommuteAndLocation(job, profile);
 
   const rawOverall =
-    skillScore * 0.5 + salaryScore * 0.3 + workModeScore * 0.2 + roleBonus;
+    skillScore * 0.4 +
+    salaryScore * 0.25 +
+    workModeScore * 0.15 +
+    commuteScore * 0.2 +
+    roleBonus;
   const overallScore = Math.max(15, Math.min(99, Math.round(rawOverall)));
 
   // Mutual Fit Score measures how strongly the company's needs + culture match the candidate's superpowers
@@ -259,6 +257,7 @@ export function calculateJobMatch(
     skillScore,
     salaryScore,
     workModeScore,
+    commuteScore,
     mutualFitScore,
     matchedSkills,
     missingSkills,
@@ -286,7 +285,8 @@ export function prioritizeAndFilterJobs(
     if (filters.source !== 'All' && job.source !== filters.source) {
       return false;
     }
-    if (job.salaryMaxK < filters.minSalaryK) {
+    const salaryUnknown = job.salaryMaxK === 0 && job.salaryMinK === 0;
+    if (!salaryUnknown && job.salaryMaxK < filters.minSalaryK) {
       return false;
     }
     if (
@@ -344,7 +344,6 @@ export interface PipelineMetrics {
   archivedCount: number;
   coverLettersDrafted: number;
   resumesTailored: number;
-  autoAppliedCount: number;
 }
 
 export function computePipelineMetrics(
@@ -361,7 +360,6 @@ export function computePipelineMetrics(
   let archivedCount = 0;
   let coverLettersDrafted = 0;
   let resumesTailored = 0;
-  let autoAppliedCount = 0;
 
   for (const rec of records) {
     if (rec.status === 'Saved') savedCount++;
@@ -375,9 +373,6 @@ export function computePipelineMetrics(
     if (rec.tailoredResumeDraft && rec.tailoredResumeDraft.trim().length > 20) {
       resumesTailored++;
     }
-    if (rec.autoAppliedByAgent) {
-      autoAppliedCount++;
-    }
   }
 
   return {
@@ -389,10 +384,36 @@ export function computePipelineMetrics(
     archivedCount,
     coverLettersDrafted,
     resumesTailored,
-    autoAppliedCount,
   };
 }
 
-export function formatSalaryRange(minK: number, maxK: number): string {
-  return `$${minK}k–$${maxK}k`;
+export function scoreCommuteAndLocation(
+  job: JobListing,
+  profile: CandidateProfile
+): number {
+  const maxMinutes = profile.consultationBlueprint?.maxCommuteMinutes;
+  const home = profile.consultationBlueprint?.homeLocation || profile.homeLocation || '';
+
+  if (job.workMode === 'Remote') {
+    return 100;
+  }
+
+  if (typeof maxMinutes === 'number' && maxMinutes === 0) {
+    return job.workMode === 'Hybrid' ? 35 : 15;
+  }
+  if (!home.trim()) return 60;
+
+  const parts = (value: string) => value.toLocaleLowerCase().split(/[;,]/).map(part => part.trim()).filter(Boolean);
+  const homeParts = parts(home);
+  const jobParts = parts(job.location);
+  if (!homeParts.length || !jobParts.length) return 60;
+  const homeCity = homeParts[0];
+  const jobCity = jobParts[0];
+  if (homeCity === jobCity || homeCity.includes(jobCity) || jobCity.includes(homeCity)) {
+    return job.workMode === 'Hybrid' ? 92 : 86;
+  }
+  const sharedRegion = homeParts.slice(1).some(part => jobParts.slice(1).includes(part));
+  if (sharedRegion) return job.workMode === 'Hybrid' ? 68 : 58;
+  return job.workMode === 'Hybrid' ? 32 : 24;
 }
+

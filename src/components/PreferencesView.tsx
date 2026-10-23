@@ -1,11 +1,20 @@
 import React, { useState } from 'react';
-import { CandidateProfile, WorkMode } from '../types/career';
-import { Plus, Trash2, Upload } from 'lucide-react';
+import { AgentMemory, CandidateProfile, WorkMode } from '../types/career';
+import { Database, Plus, Trash2, Upload } from 'lucide-react';
+import { ingestResumeFile } from '../utils/resumeIngest';
+import { formatAgentError } from '../utils/agentApi';
+import { COUNTRY_OPTIONS, currencyForCountry, formatAnnualSalary, salaryCeiling, timeZoneForCountry } from '../utils/localePreferences';
 
 interface PreferencesViewProps {
   profile: CandidateProfile;
   onUpdateProfile: (updated: CandidateProfile) => void;
   onResetDefaults: () => void;
+  onLoadDemoData: () => void;
+  onReportError: (error: unknown) => void;
+  agentMemory: AgentMemory;
+  lastSessionAt?: string;
+  onSaveData: () => void;
+  onResetAllData: () => void;
 }
 
 const WORK_MODES: WorkMode[] = ['Remote', 'Hybrid', 'On-site'];
@@ -14,6 +23,12 @@ export const PreferencesView: React.FC<PreferencesViewProps> = ({
   profile,
   onUpdateProfile,
   onResetDefaults,
+  onLoadDemoData,
+  onReportError,
+  agentMemory,
+  lastSessionAt,
+  onSaveData,
+  onResetAllData,
 }) => {
   const [newSkill, setNewSkill] = useState<string>('');
   const [newRole, setNewRole] = useState<string>('');
@@ -26,23 +41,22 @@ export const PreferencesView: React.FC<PreferencesViewProps> = ({
     setTimeout(() => setSavedNotice(null), 3000);
   };
 
-  const handleResumeUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const content =
-        typeof reader.result === 'string' && reader.result.trim().length > 0
-          ? reader.result
-          : profile.baseResumeText;
+    try {
+      const parsed = await ingestResumeFile(file);
       onUpdateProfile({
         ...profile,
-        baseResumeFileName: file.name,
-        baseResumeText: content,
+        baseResumeFileName: parsed.fileName,
+        baseResumeText: parsed.text,
       });
       triggerSaved(`Uploaded resume "${file.name}" for Resume Tailoring Agent`);
-    };
-    reader.readAsText(file);
+    } catch (error) {
+      onReportError(error);
+      triggerSaved(formatAgentError(error));
+    }
   };
 
   const handleAddSkill = (e: React.FormEvent) => {
@@ -145,13 +159,38 @@ export const PreferencesView: React.FC<PreferencesViewProps> = ({
           )}
           <button
             type="button"
+            onClick={() => { onSaveData(); triggerSaved('Profile, memory, jobs, and applications saved on this device.'); }}
+            className="px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800"
+          >Save now</button>
+          <button
+            type="button"
             onClick={onResetDefaults}
             className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
           >
-            Reset Defaults
+            Reset profile defaults
           </button>
         </div>
       </div>
+
+      <section className="mb-6 rounded-lg border border-slate-200 bg-white p-5">
+        <div className="flex items-start gap-3">
+          <Database className="mt-0.5 h-5 w-5 text-slate-700" />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-semibold text-slate-900">Agent memory & saved data</h2>
+            <p className="mt-1 text-xs leading-relaxed text-slate-600">Your resume, preferences, jobs, applications, consultant conversations, and compact agent memory are saved automatically in this browser. They are not synced to an account. Anyone with access to this browser profile may be able to view this data.</p>
+            <p className="mt-2 text-xs text-slate-500">Memory has three parts: career facts and preferences, recent session episodes, and your instructions for how agents should work. A local reflection step updates these after changes without making an extra model call.</p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <div className="rounded bg-slate-50 p-3"><strong className="text-xs">Semantic memory</strong><p className="mt-1 line-clamp-4 whitespace-pre-line text-[11px] text-slate-600">{agentMemory.semantic || 'Add profile details and work preferences to build this memory.'}</p></div>
+              <div className="rounded bg-slate-50 p-3"><strong className="text-xs">Recent episodes</strong><p className="mt-1 text-[11px] text-slate-600">{agentMemory.episodic.length} remembered events</p><p className="mt-1 text-[11px] text-slate-500">{agentMemory.episodic[0]?.summary || 'Consultations, resume analysis, and job searches appear here.'}</p></div>
+              <div className="rounded bg-slate-50 p-3"><strong className="text-xs">Procedural memory</strong><p className="mt-1 text-[11px] text-slate-600">{agentMemory.procedural.length} saved instructions</p><p className="mt-1 text-[11px] text-slate-500">{lastSessionAt ? `Last opened ${new Date(lastSessionAt).toLocaleString()}` : 'This is the first saved session.'}</p></div>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+              <button type="button" onClick={() => { if (window.confirm('Delete your saved resume, profile, preferences, applications, jobs, conversation history, and agent memory from this browser? This cannot be undone.')) onResetAllData(); }} className="inline-flex items-center gap-1.5 rounded-md border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"><Trash2 className="h-3.5 w-3.5"/>Reset all saved data</button>
+              <span className="text-[11px] text-slate-500">The app opens to Daily Feed next time. Your last activity summary is shown there.</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* Uploaded Base Resume Card (Used by Resume Tailoring Agent) */}
       <div className="p-5 mb-6 bg-white border border-slate-200 rounded-lg space-y-3">
@@ -198,38 +237,64 @@ export const PreferencesView: React.FC<PreferencesViewProps> = ({
               Compensation & Work Mode Priorities
             </h2>
 
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <h3 className="text-xs font-semibold text-slate-800">Your work location</h3>
+              <p className="mt-1 text-[11px] text-slate-500">Salary and job search context use this market. Your time zone is prefilled and editable.</p>
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="text-xs font-medium text-slate-700">Country or market
+                  <input list="preferences-country-options" value={profile.preferredCountry || ''} onChange={e=>{
+                    const country=e.target.value; const currency=currencyForCountry(country); const timeZone=timeZoneForCountry(country);
+                    onUpdateProfile({...profile,preferredCountry:country,...(currency?{salaryCurrency:currency}:{}),...(timeZone?{timeZone}:{}),minSalaryK:0,consultationBlueprint:{...profile.consultationBlueprint,preferredCountry:country,...(currency?{salaryCurrency:currency}:{}),...(timeZone?{timeZone}:{}),minSalaryK:0}}); triggerSaved('Location market updated');
+                  }} placeholder="Choose or type a country" className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs" />
+                  <datalist id="preferences-country-options">{COUNTRY_OPTIONS.map(([code,name])=><option key={code} value={name}/>)}</datalist>
+                </label>
+                <label className="text-xs font-medium text-slate-700">Salary currency
+                  <input maxLength={3} value={profile.salaryCurrency || 'USD'} onChange={e=>onUpdateProfile({...profile,salaryCurrency:e.target.value.toUpperCase(),minSalaryK:0,consultationBlueprint:{...profile.consultationBlueprint,salaryCurrency:e.target.value.toUpperCase(),minSalaryK:0}})} placeholder="e.g. MYR" className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs uppercase" />
+                </label>
+                <label className="text-xs font-medium text-slate-700">Time zone
+                  <input value={profile.timeZone || 'UTC'} onChange={e=>onUpdateProfile({...profile,timeZone:e.target.value,consultationBlueprint:{...profile.consultationBlueprint,timeZone:e.target.value}})} placeholder="e.g. Asia/Kuala_Lumpur" className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs" />
+                </label>
+                <label className="text-xs font-medium text-slate-700">Where are you based?
+                  <input value={profile.homeLocation || ''} onChange={e=>onUpdateProfile({...profile,homeLocation:e.target.value,consultationBlueprint:{...profile.consultationBlueprint,homeLocation:e.target.value}})} placeholder="Your city or area, e.g. Petaling Jaya, Selangor" autoComplete="address-level2" className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs" />
+                  <span className={`mt-1 block text-[10px] font-normal ${profile.homeLocation ? 'text-slate-500' : 'text-amber-700'}`}>{profile.homeLocation ? 'Commute fit uses this as your starting point. Your desired job locations are set separately.' : 'Add your city or area to personalize commute fit. Until then, location scoring stays neutral.'}</span>
+                </label>
+              </div>
+            </div>
+
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label
                   htmlFor="pref-min-salary"
                   className="text-xs font-medium text-slate-700"
                 >
-                  Minimum Base Salary Target
+                  Minimum Annual Base Salary ({profile.salaryCurrency || 'USD'})
                 </label>
                 <span className="text-sm font-bold text-slate-900 font-mono tabular-nums">
-                  ${profile.minSalaryK}k / yr
+                  {formatAnnualSalary(profile.minSalaryK,profile.salaryCurrency || 'USD')} / yr
                 </span>
               </div>
               <input
                 id="pref-min-salary"
                 type="range"
-                min={120}
-                max={260}
-                step={5}
+                min={0}
+                max={salaryCeiling(profile.salaryCurrency)}
+                step={salaryCeiling(profile.salaryCurrency) > 1000 ? 100 : 5}
                 value={profile.minSalaryK}
                 onChange={(e) => {
+                  const salary = Number(e.target.value);
                   onUpdateProfile({
                     ...profile,
-                    minSalaryK: Number(e.target.value),
+                    minSalaryK: salary,
+                    consultationBlueprint: { ...profile.consultationBlueprint, minSalaryK: salary },
                   });
                   triggerSaved();
                 }}
                 className="w-full accent-slate-900 cursor-pointer"
               />
               <div className="flex justify-between text-[11px] font-mono tabular-nums text-slate-400 mt-1">
-                <span>$120k</span>
-                <span>$190k</span>
-                <span>$260k</span>
+                <span>{profile.salaryCurrency} 0</span>
+                <span>{profile.salaryCurrency} {Math.round(salaryCeiling(profile.salaryCurrency)/2)}k</span>
+                <span>{profile.salaryCurrency} {salaryCeiling(profile.salaryCurrency)}k</span>
               </div>
             </div>
 
@@ -341,6 +406,14 @@ export const PreferencesView: React.FC<PreferencesViewProps> = ({
                 }
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
               />
+            </div>
+            <div>
+              <label htmlFor="pref-personality" className="block text-xs font-medium text-slate-700 mb-1">Personality & work style (optional)</label>
+              <textarea id="pref-personality" rows={3} value={profile.personalityNotes || ''} onChange={(e) => onUpdateProfile({ ...profile, personalityNotes: e.target.value })} placeholder="For example: I prefer collaborative teams, thoughtful feedback, and time to focus." className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
+            </div>
+            <div>
+              <label htmlFor="pref-agent-instructions" className="block text-xs font-medium text-slate-700 mb-1">Instructions for your agents</label>
+              <textarea id="pref-agent-instructions" rows={3} value={profile.agentInstructions || ''} onChange={(e) => onUpdateProfile({ ...profile, agentInstructions: e.target.value })} placeholder="For example: Keep recommendations concise and never assume a salary currency." className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
             </div>
           </div>
         </div>

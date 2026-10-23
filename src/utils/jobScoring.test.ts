@@ -4,10 +4,10 @@ import {
   applyBlueprintToProfile,
   calculateJobMatch,
   computePipelineMetrics,
-  extractResumeAndLinkedInSignals,
   formatSalaryRange,
   generateTailoredResumeText,
   prioritizeAndFilterJobs,
+  skillsMatch,
 } from './jobScoring';
 import {
   CandidateProfile,
@@ -43,6 +43,7 @@ const mockProfile: CandidateProfile = {
   minSalaryK: 190,
   preferredWorkModes: ['Remote', 'Hybrid'],
   preferredLocations: ['San Francisco, CA', 'Remote'],
+  homeLocation: 'San Francisco, CA',
   bioSummary: '8 years building distributed systems and AI agent workflows.',
   keyAchievements: ['Scaled ingestion pipeline to 50k RPS'],
   baseResumeText: 'EXPERIENCE: Staff Engineer at CloudScale (2022-2026) — Built TypeScript & Python distributed pipelines and mentored 8 engineers.',
@@ -70,9 +71,9 @@ const sampleJobs: JobListing[] = [
     department: 'Core Platform',
     seniority: 'Staff',
     agentSummary: 'High-impact architecture role leading autonomous AI agent runtime services.',
-    whyItMatches: 'Matches 100% of required technical stack and exceeds $190k salary floor.',
-    whyCompanyLovesYou: 'Your track record scaling ingestion pipelines to 50k RPS directly solves Linearity Cloud’s core bottleneck.',
-    dreamJobAlignment: '100% Remote, high-autonomy AI agent architecture role.',
+    whyItMatches: 'Matches required technical stack and salary floor.',
+    whyCompanyLovesYou: 'Pipeline scaling experience may overlap this role — AI-generated, not verified.',
+    dreamJobAlignment: '100% Remote AI architecture role.',
     keyResponsibilities: ['Design distributed agent execution engine'],
     feedBatchDate: 'Today · Morning Scan',
   },
@@ -114,7 +115,7 @@ const sampleJobs: JobListing[] = [
     department: 'R&D Informatics',
     seniority: 'Principal',
     agentSummary: 'Hybrid principal engineering position building scientific data portals.',
-    whyItMatches: 'Strong match on TypeScript, Python, and PostgreSQL with $230k ceiling.',
+    whyItMatches: 'Strong match on TypeScript, Python, and PostgreSQL.',
     keyResponsibilities: ['Architect scientific compute workflows'],
     feedBatchDate: 'Today · Morning Scan',
   },
@@ -126,23 +127,89 @@ test('calculateJobMatch computes high alignment and mutualFitScore for dream job
 
   assert.equal(match1.skillScore, 100);
   assert.ok(match1.mutualFitScore >= 90);
-  assert.ok(match1.overallScore >= 90, `Expected >= 90, got ${match1.overallScore}`);
+  assert.ok(match1.overallScore >= 85, `Expected >= 85, got ${match1.overallScore}`);
   assert.equal(match1.priorityTier, 'Priority 1 · Dream Job & Mutual Fit');
 
   assert.ok(match2.overallScore < 65, `Expected < 65 for low-salary on-site role, got ${match2.overallScore}`);
 });
 
-test('extractResumeAndLinkedInSignals detects skills and superpowers from resume + LinkedIn text', () => {
-  const signals = extractResumeAndLinkedInSignals(
-    mockProfile.baseResumeText,
-    mockProfile.linkedInSummary,
-    mockProfile
+test('skill matching is exact after alias normalisation (Go does not match Django)', () => {
+  assert.equal(skillsMatch('Go', 'Django'), false);
+  assert.equal(skillsMatch('Rust', 'trust'), false);
+  assert.equal(skillsMatch('Go', 'Golang'), true);
+  assert.equal(skillsMatch('Node', 'Node.js'), true);
+
+  const goProfile: CandidateProfile = { ...mockProfile, skills: ['Go'] };
+  const djangoJob: JobListing = {
+    ...sampleJobs[0],
+    requiredSkills: ['Django'],
+    preferredSkills: [],
+  };
+  const match = calculateJobMatch(djangoJob, goProfile);
+  assert.equal(match.matchedSkills.length, 0);
+  assert.ok(match.missingSkills.includes('Django'));
+});
+
+test('unknown salary is scored neutrally and is not filtered by the minimum-salary filter', () => {
+  const unknownSalaryJob: JobListing = {
+    ...sampleJobs[0],
+    salaryMinK: 0,
+    salaryMaxK: 0,
+  };
+  const match = calculateJobMatch(unknownSalaryJob, mockProfile);
+  assert.equal(match.salaryScore, 70);
+  assert.equal(formatSalaryRange(0, 0), 'Not listed');
+
+  const filter: FilterState = {
+    workMode: 'All',
+    source: 'All',
+    minSalaryK: 190,
+    searchQuery: '',
+    sortBy: 'priority',
+    onlyPriorityOne: false,
+  };
+  const results = prioritizeAndFilterJobs([unknownSalaryJob], mockProfile, filter);
+  assert.equal(results.length, 1);
+});
+
+test('remote jobs score full commute; distant on-site scores lower', () => {
+  const remoteMatch = calculateJobMatch(sampleJobs[0], mockProfile);
+  assert.equal(remoteMatch.commuteScore, 100);
+
+  const distantOnsite = calculateJobMatch(sampleJobs[1], mockProfile);
+  assert.ok(distantOnsite.commuteScore < 50);
+
+  const localHybrid: JobListing = {
+    ...sampleJobs[2],
+    location: 'San Francisco, CA',
+    workMode: 'Hybrid',
+  };
+  const localMatch = calculateJobMatch(localHybrid, mockProfile);
+  assert.ok(localMatch.commuteScore > distantOnsite.commuteScore);
+
+  const nearbyOnsite = { ...sampleJobs[1], location: 'San Francisco, CA', workMode: 'On-site' as const };
+  assert.ok(calculateJobMatch(nearbyOnsite, mockProfile).commuteScore > distantOnsite.commuteScore);
+
+  const shorterBudgetProfile: CandidateProfile = {
+    ...mockProfile,
+    consultationBlueprint: { ...defaultBlueprint, maxCommuteMinutes: 10 },
+  };
+  const longerBudgetProfile: CandidateProfile = {
+    ...mockProfile,
+    consultationBlueprint: { ...defaultBlueprint, maxCommuteMinutes: 55 },
+  };
+  assert.equal(
+    calculateJobMatch(localHybrid, longerBudgetProfile).commuteScore,
+    calculateJobMatch(localHybrid, shorterBudgetProfile).commuteScore
   );
-  assert.ok(signals.detectedSkills.includes('Kubernetes'));
-  assert.ok(signals.detectedSkills.includes('Rust'));
-  assert.ok(signals.extractedSuperpowers.length >= 3);
-  assert.ok(signals.idealCompanyDNA.length > 20);
-  assert.ok(signals.dreamJobDefinition.length > 20);
+});
+
+test('commute fit uses the home base and stays neutral without it', () => {
+  const job = { ...sampleJobs[1], location: 'Austin, TX', workMode: 'On-site' as const };
+  const withoutHome = { ...mockProfile, homeLocation: '', preferredLocations: ['Austin, TX'], consultationBlueprint: { ...defaultBlueprint, targetLocations: ['Austin, TX'] } };
+  const withHome = { ...withoutHome, homeLocation: 'San Francisco, CA' };
+  assert.equal(calculateJobMatch(job, withoutHome).commuteScore, 60);
+  assert.equal(calculateJobMatch(job, withHome).commuteScore, 24);
 });
 
 test('prioritizeAndFilterJobs filters by Remote/Hybrid and source accurately', () => {
@@ -173,36 +240,37 @@ test('applyBlueprintToProfile synchronizes consultation blueprint into candidate
   assert.ok(updatedProfile.targetRoles.includes('Founding AI Architect'));
 });
 
-test('generateTailoredResumeText weaves matched skills, whyCompanyLovesYou, and base resume into role-specific resume', () => {
+test('generateTailoredResumeText stays grounded and omits unverifiable company-love claims', () => {
   const scoredJob = {
     ...sampleJobs[0],
     match: calculateJobMatch(sampleJobs[0], mockProfile),
   };
   const tailored = generateTailoredResumeText(scoredJob, mockProfile);
   assert.ok(tailored.includes('LINEARITY CLOUD'));
-  assert.ok(tailored.includes('WHY LINEARITY CLOUD WILL LOVE HAVING YOU ON THE TEAM'));
+  assert.equal(tailored.includes('WILL LOVE HAVING YOU ON THE TEAM'), false);
+  assert.equal(tailored.includes('VP of Engineering'), false);
   assert.ok(tailored.includes('Alex_Rivera_Resume_2026.txt'));
 });
 
-test('computePipelineMetrics tallies tracked stages, tailored resumes, cover letters, and auto-applications', () => {
+test('computePipelineMetrics tallies tracked stages and prepared documents', () => {
   const metrics = computePipelineMetrics({
     'job-1': {
       jobId: 'job-1',
       status: 'Applied',
       updatedAt: '2026-10-20',
-      notes: 'Auto-applied with tailored package',
+      notes: 'Submitted on the job board after preparing the package',
       tailoredResumeDraft: 'ALEX RIVERA — Tailored Resume for Linearity Cloud...',
       coverLetterDraft: 'Dear Linearity Cloud Hiring Team, I am excited to apply...',
-      autoAppliedByAgent: true,
     },
   });
 
   assert.equal(metrics.totalTracked, 1);
   assert.equal(metrics.appliedCount, 1);
   assert.equal(metrics.resumesTailored, 1);
-  assert.equal(metrics.autoAppliedCount, 1);
 });
 
 test('formatSalaryRange formats salary bounds cleanly', () => {
-  assert.equal(formatSalaryRange(185, 225), '$185k–$225k');
+  const formatted = formatSalaryRange(185, 225, 'USD');
+  assert.ok(formatted.includes('185,000') && formatted.includes('225,000') && formatted.includes('/ year'));
+  assert.equal(formatSalaryRange(0, 0, 'MYR'), 'Not listed');
 });

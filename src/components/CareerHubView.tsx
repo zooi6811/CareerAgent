@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   CandidateProfile,
   ConsultantChatMessage,
   ConsultationBlueprint,
   WorkMode,
 } from '../types/career';
+import { ingestResumeFile } from '../utils/resumeIngest';
+import { formatAgentError } from '../utils/agentApi';
+import { COUNTRY_OPTIONS, currencyForCountry, formatAnnualSalary, salaryCeiling, timeZoneForCountry } from '../utils/localePreferences';
 import {
   ArrowRight,
   Compass,
@@ -25,7 +28,7 @@ interface CareerHubViewProps {
     linkedInUrl: string,
     linkedInSummary: string,
     autoLaunchJobSearch?: boolean
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   messages: ConsultantChatMessage[];
   onSendMessage: (message: string) => Promise<void>;
   onEndSessionAndLaunchSearch: (
@@ -34,13 +37,15 @@ interface CareerHubViewProps {
   isConsulting: boolean;
   isAnalyzingProfile: boolean;
   isHandingOff: boolean;
+  onLoadDemoData: () => void;
+  onReportError: (err: unknown) => void;
 }
 
 const DISCOVERY_PROMPTS = [
-  'Based on my resume & LinkedIn, what kind of company would genuinely love having me on their team?',
-  'My dream job is building autonomous AI agent workflows with $210k+ base and zero commute (100% Remote).',
-  'I prioritize high job security (Series C+ or profitable), strong work-life balance, and <20 min commute.',
-  'I want a clear progression track to Principal Architect in a high-autonomy engineering environment.',
+  'Based on my resume, what kind of company and role look like a realistic fit?',
+  'I want remote or low-commute hybrid work. Help me set location and commute in the blueprint.',
+  'I care about work-life balance, job security, and a clear progression path.',
+  'Help me set a compensation floor from my experience, without inflating it.',
 ];
 
 export const CareerHubView: React.FC<CareerHubViewProps> = ({
@@ -54,9 +59,12 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
   isConsulting,
   isAnalyzingProfile,
   isHandingOff,
+  onLoadDemoData,
+  onReportError,
 }) => {
   const [chatInput, setChatInput] = useState<string>('');
   const [passionInput, setPassionInput] = useState<string>('');
+  const [locationDraft, setLocationDraft] = useState<string>(blueprint.targetLocations.join(', '));
   const [resumeText, setResumeText] = useState<string>(profile.baseResumeText);
   const [resumeFileName, setResumeFileName] = useState<string>(
     profile.baseResumeFileName
@@ -69,6 +77,17 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
   const [analysisStatusBanner, setAnalysisStatusBanner] = useState<string | null>(
     null
   );
+  const conversationRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setResumeText(profile.baseResumeText);
+    setResumeFileName(profile.baseResumeFileName);
+    setLinkedInUrl(profile.linkedInUrl);
+    setLinkedInSummary(profile.linkedInSummary);
+  }, [profile.baseResumeText, profile.baseResumeFileName, profile.linkedInUrl, profile.linkedInSummary]);
+
+  useEffect(() => { setLocationDraft(blueprint.targetLocations.join(', ')); }, [blueprint.targetLocations]);
+  useEffect(() => { conversationRef.current?.scrollTo({ top: conversationRef.current.scrollHeight, behavior: 'smooth' }); }, [messages.length, isConsulting]);
 
   const handleSend = async (text: string) => {
     const trimmed = text.trim();
@@ -77,35 +96,59 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
     await onSendMessage(trimmed);
   };
 
-  const handleResumeFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const hasAnalyzed = Boolean(profile.profileAnalyzedAt);
+  const onboardingIncomplete = !resumeText.trim();
+
+  const handleResumeFileUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const content = typeof reader.result === 'string' ? reader.result : '';
-      if (content.trim()) {
-        setResumeFileName(file.name);
-        setResumeText(content.trim());
-        setAnalysisStatusBanner(
-          `Loaded "${file.name}". Click "Analyze Resume & LinkedIn Profile" to extract your superpowers and dream job blueprint.`
-        );
-      }
-    };
-    reader.readAsText(file);
+    try {
+      const parsed = await ingestResumeFile(file);
+      setResumeFileName(parsed.fileName);
+      setResumeText(parsed.text);
+      setShowSourceEditors(true);
+      setAnalysisStatusBanner(
+        `Loaded "${parsed.fileName}". Review the extracted text, optionally paste LinkedIn About & Experience, then analyze.`
+      );
+    } catch (err) {
+      onReportError(err);
+      setAnalysisStatusBanner(formatAgentError(err));
+    }
+  };
+
+  const handleLinkedInExportUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const parsed = await ingestResumeFile(file);
+      setLinkedInSummary(parsed.text);
+      setShowSourceEditors(true);
+      setAnalysisStatusBanner(
+        `Loaded LinkedIn export "${parsed.fileName}". A profile URL is not fetched — only this pasted/exported text is analyzed.`
+      );
+    } catch (err) {
+      onReportError(err);
+    }
   };
 
   const handleRunProfileAnalysis = async (autoLaunchJobSearch = false) => {
     setAnalysisStatusBanner(null);
-    await onAnalyzeResumeAndLinkedIn(
+    const success = await onAnalyzeResumeAndLinkedIn(
       resumeText,
       resumeFileName,
       linkedInUrl,
       linkedInSummary,
       autoLaunchJobSearch
     );
-    if (!autoLaunchJobSearch) {
+    if (success && !autoLaunchJobSearch) {
       setAnalysisStatusBanner(
-        `Career Consultant Agent analyzed ${resumeFileName} & LinkedIn (${linkedInUrl}) — extracted superpowers, ideal company DNA, and synced your Dream Job Blueprint.`
+        `Career Consultant Agent analyzed ${resumeFileName} and the text you provided — extracted strengths and synced your Dream Job Blueprint.`
       );
     }
   };
@@ -142,7 +185,7 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
           <div>
             <p className="text-xs text-slate-500 mb-1">
-              CareerHub · Zero-Friction Resume & LinkedIn Discovery · Dream Job & Mutual Fit Engine
+              CareerHub · Resume & LinkedIn text analysis · Blueprint for job search
             </p>
             <h1 className="text-2xl font-bold text-slate-900 font-display">
               Career Consultant Agent & Passion Blueprint
@@ -152,8 +195,15 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
             <button
               type="button"
+              onClick={onLoadDemoData}
+              className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
+            >
+              Load demo data
+            </button>
+            <button
+              type="button"
               onClick={() => handleRunProfileAnalysis(true)}
-              disabled={isAnalyzingProfile || isHandingOff}
+              disabled={isAnalyzingProfile || isHandingOff || onboardingIncomplete}
               className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-900 bg-emerald-50 border border-emerald-300 rounded-lg hover:bg-emerald-100 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0"
             >
               <Zap className="w-3.5 h-3.5 text-emerald-700" />
@@ -167,13 +217,13 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
             <button
               type="button"
               onClick={() => onEndSessionAndLaunchSearch(blueprint)}
-              disabled={isHandingOff || isAnalyzingProfile}
+              disabled={isHandingOff || isAnalyzingProfile || !hasAnalyzed}
               className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0"
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>
                 {isHandingOff
-                  ? 'Handing Off to Job Search Agent...'
+                  ? 'Handing off to Job Search Agent...'
                   : 'End Consultation & Launch Job Search'}
               </span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -187,23 +237,23 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
             <div>
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <span className="font-semibold text-slate-900">
-                  Zero-Friction Candidate Onboarding (Resume + LinkedIn Analysis)
+                  Onboarding: resume required, LinkedIn text optional
                 </span>
                 <span aria-hidden="true" className="text-slate-400">
                   ·
                 </span>
                 <span className="font-mono text-slate-600">
-                  Resume: {resumeFileName}
+                  Resume: {resumeFileName || 'none'}
                 </span>
                 <span aria-hidden="true" className="text-slate-400">
                   ·
                 </span>
                 <span className="font-mono text-slate-600">
-                  LinkedIn: {linkedInUrl}
+                  LinkedIn text: {linkedInSummary.trim() ? 'pasted' : 'not provided'}
                 </span>
               </div>
               <p className="text-xs text-slate-600 mt-0.5">
-                Instead of answering twenty manual questionnaires, the Career Consultant Agent reads your existing Resume and LinkedIn profile to uncover your superpowers and match you with companies that will genuinely love having you on their team.
+                A LinkedIn URL cannot be fetched (login wall). Paste your About and Experience, or upload a LinkedIn PDF export. Then analyze, consult, and hand off the blueprint to search.
               </p>
             </div>
 
@@ -213,7 +263,7 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
                 <span>Upload Resume</span>
                 <input
                   type="file"
-                  accept=".txt,.md,.json"
+                  accept=".txt,.md,.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   onChange={handleResumeFileUpload}
                   className="sr-only"
                   aria-label="Upload existing resume file for Career Consultant analysis"
@@ -236,7 +286,7 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
               <button
                 type="button"
                 onClick={() => handleRunProfileAnalysis(false)}
-                disabled={isAnalyzingProfile}
+                disabled={isAnalyzingProfile || onboardingIncomplete}
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md disabled:opacity-60 transition-colors whitespace-nowrap shrink-0"
               >
                 <Sparkles className="w-3.5 h-3.5" />
@@ -273,7 +323,7 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
                     htmlFor="careerhub-linkedin-url"
                     className="block text-xs font-semibold text-slate-900 mb-1"
                   >
-                    LinkedIn Profile URL
+                    LinkedIn Profile URL (optional reference only — not fetched)
                   </label>
                   <input
                     id="careerhub-linkedin-url"
@@ -285,11 +335,21 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
                   />
                 </div>
                 <div>
+                  <label className="inline-flex items-center gap-1.5 mb-1 px-2 py-1 text-[11px] font-medium text-slate-700 bg-white border border-slate-300 rounded cursor-pointer">
+                    <Upload className="w-3 h-3" />
+                    Upload LinkedIn PDF export
+                    <input
+                      type="file"
+                      accept=".pdf,.txt,.md,.docx"
+                      onChange={handleLinkedInExportUpload}
+                      className="sr-only"
+                    />
+                  </label>
                   <label
                     htmlFor="careerhub-linkedin-summary"
                     className="block text-xs font-semibold text-slate-900 mb-1"
                   >
-                    LinkedIn Headline, About & Endorsements
+                    Paste LinkedIn About & Experience
                   </label>
                   <textarea
                     id="careerhub-linkedin-summary"
@@ -362,10 +422,10 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
               05. Upon Confirmation
             </div>
             <div className="font-semibold text-slate-900 mt-0.5">
-              Auto-Apply Agent
+              Application Prep Agent
             </div>
             <div className="text-[11px] text-slate-600 mt-0.5">
-              Submits tailored package & logs receipt
+              Exports your package and opens the real posting
             </div>
           </div>
         </div>
@@ -374,7 +434,7 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
       {/* Main 2-Column Split: Consultant Chat on Left, Live Holistic Career Blueprint on Right */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
         {/* Left Column: Career Consultant Agent Chat */}
-        <div className="lg:col-span-6 flex flex-col justify-between bg-white border border-slate-200 rounded-lg p-5">
+        <div className="lg:col-span-6 lg:self-start flex flex-col gap-4 bg-white border border-slate-200 rounded-lg p-5">
           <div>
             <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-200">
               <div className="flex items-center gap-2">
@@ -400,7 +460,7 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
                   <button
                     key={idx}
                     type="button"
-                    disabled={isConsulting}
+                    disabled={isConsulting || !hasAnalyzed}
                     onClick={() => handleSend(prompt)}
                     className="text-left px-3 py-2 text-xs text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200/80 rounded-md transition-colors disabled:opacity-50"
                   >
@@ -413,7 +473,8 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
             {/* Chat Conversation Feed */}
             <div
               aria-label="Career Consultant conversation"
-              className="space-y-3 max-h-[380px] overflow-y-auto pr-1 mb-4"
+              ref={conversationRef}
+              className="space-y-3 max-h-[min(42vh,400px)] min-h-0 overflow-y-auto overscroll-contain scroll-smooth pr-1"
             >
               {messages.map((msg) => (
                 <div
@@ -462,12 +523,17 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
               type="text"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              placeholder="Share your passions, ideal commute, work-life balance, or target salary..."
+              placeholder={
+                hasAnalyzed
+                  ? 'Share passions, commute, work-life balance, or target salary...'
+                  : 'Analyze your resume first, then chat'
+              }
+              disabled={!hasAnalyzed}
               className="flex-1 px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-slate-900"
             />
             <button
               type="submit"
-              disabled={isConsulting || !chatInput.trim()}
+              disabled={isConsulting || !chatInput.trim() || !hasAnalyzed}
               aria-label="Send message to Career Consultant"
               className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 disabled:opacity-50 transition-colors whitespace-nowrap shrink-0"
             >
@@ -500,12 +566,10 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
                 Why Companies Will Love Having You on Their Team (Extracted Superpowers)
               </div>
               <ul className="space-y-1 text-xs text-slate-800 list-disc pl-4">
-                {(
-                  blueprint.extractedSuperpowers || [
-                    '0-to-1 AI Agent & Distributed Systems Architecture (p95 < 450ms at 140k+ daily users)',
-                    'Full-Stack Product Ownership (React/TypeScript interfaces + Node.js/Python runtimes)',
-                    'High-ROI Infrastructure Optimization (34% cloud spend reduction)',
-                  ]
+                {(blueprint.extractedSuperpowers &&
+                blueprint.extractedSuperpowers.length > 0
+                  ? blueprint.extractedSuperpowers
+                  : ['Run analysis on your resume to extract strengths from the documents.']
                 ).map((sp, i) => (
                   <li key={i} className="leading-relaxed">
                     {sp}
@@ -530,7 +594,8 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
                 Consultant Passion & Dream Job Synthesis
               </div>
               <p className="text-xs text-slate-800 leading-relaxed">
-                {blueprint.consultantSummary}
+                {blueprint.consultantSummary ||
+                  'No blueprint yet. Analyze your resume to populate this.'}
               </p>
             </div>
           </div>
@@ -571,23 +636,18 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
                 htmlFor="bp-locations"
                 className="block text-xs font-semibold text-slate-900 mb-1"
               >
-                2. Job Location Preferences
+                2. Preferred work locations
               </label>
-              <input
+              <textarea
                 id="bp-locations"
-                type="text"
-                value={blueprint.targetLocations.join(', ')}
-                onChange={(e) =>
-                  onUpdateBlueprint({
-                    ...blueprint,
-                    targetLocations: e.target.value
-                      .split(',')
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  })
-                }
-                className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-md"
+                rows={2}
+                value={locationDraft}
+                placeholder="Separate cities with commas, e.g. Kuala Lumpur, George Town, Remote"
+                onChange={(e) => setLocationDraft(e.target.value)}
+                onBlur={() => onUpdateBlueprint({ ...blueprint, targetLocations: [...new Set(locationDraft.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean))] })}
+                className="w-full resize-y px-3 py-1.5 text-xs border border-slate-300 rounded-md"
               />
+              <p className="mt-1 text-[10px] text-slate-500">Add multiple cities separated by commas, semicolons, or new lines. Spaces and punctuation are allowed.</p>
             </div>
 
             <div>
@@ -596,7 +656,7 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
                   htmlFor="bp-commute"
                   className="text-xs font-semibold text-slate-900"
                 >
-                  3. Max Commute Tolerance
+                3. Max commute (minutes)
                 </label>
                 <span className="text-xs font-mono tabular-nums font-bold text-slate-900">
                   {blueprint.maxCommuteMinutes === 0
@@ -619,6 +679,31 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
                 }
                 className="w-full accent-slate-900 cursor-pointer"
               />
+              <p className="mt-1 text-[10px] text-slate-500">Used to guide local job searches. Travel times are not calculated; commute fit is ranked from the posting’s stated location.</p>
+            </div>
+
+            <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="mb-2 text-xs font-semibold text-slate-900">Location & local settings</p>
+              <p className="mb-3 text-[11px] text-slate-600">Used to tailor salary expectations, job searches, and scheduling to your market.</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="text-xs font-medium text-slate-700">Country or market
+                  <input list="career-country-options" value={blueprint.preferredCountry || profile.preferredCountry || ''} onChange={e=>{
+                    const country=e.target.value; const currency=currencyForCountry(country);
+                    onUpdateBlueprint({...blueprint,preferredCountry:country,...(currency?{salaryCurrency:currency}:{}),...(timeZoneForCountry(country)?{timeZone:timeZoneForCountry(country)}:{}),minSalaryK:0,compensationExpectation:''});
+                  }} placeholder="Choose or type a country" className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs" />
+                  <datalist id="career-country-options">{COUNTRY_OPTIONS.map(([code,name])=><option key={code} value={name}/>)}</datalist>
+                </label>
+                <label className="text-xs font-medium text-slate-700">Salary currency
+                  <input maxLength={3} value={blueprint.salaryCurrency || profile.salaryCurrency || 'USD'} onChange={e=>onUpdateBlueprint({...blueprint,salaryCurrency:e.target.value.toUpperCase(),minSalaryK:0,compensationExpectation:''})} placeholder="e.g. MYR" className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs uppercase" />
+                </label>
+                <label className="text-xs font-medium text-slate-700">Your time zone
+                  <input value={blueprint.timeZone || profile.timeZone || 'UTC'} onChange={e=>onUpdateBlueprint({...blueprint,timeZone:e.target.value})} placeholder="e.g. Asia/Kuala_Lumpur" className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs" />
+                </label>
+                <label className="text-xs font-medium text-slate-700">Where are you based?
+                  <input value={blueprint.homeLocation || profile.homeLocation || ''} onChange={e=>onUpdateBlueprint({...blueprint,homeLocation:e.target.value})} placeholder="Your city or area, e.g. Petaling Jaya, Selangor" autoComplete="address-level2" className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs" />
+                  <span className={`mt-1 block text-[10px] font-normal ${blueprint.homeLocation || profile.homeLocation ? 'text-slate-500' : 'text-amber-700'}`}>{blueprint.homeLocation || profile.homeLocation ? 'Used as your commute starting point. Keep this separate from cities where you’re willing to work.' : 'Add your city or area to personalize commute fit. Until then, location scoring stays neutral.'}</span>
+                </label>
+              </div>
             </div>
 
             <div>
@@ -667,24 +752,24 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
                   htmlFor="bp-salary"
                   className="text-xs font-semibold text-slate-900"
                 >
-                  5. Compensation Package ($k+)
+                  5. Annual base salary target ({blueprint.salaryCurrency || profile.salaryCurrency || 'USD'})
                 </label>
                 <span className="text-xs font-mono tabular-nums font-bold text-slate-900">
-                  ${blueprint.minSalaryK}k+ Base
+                  {formatAnnualSalary(blueprint.minSalaryK,blueprint.salaryCurrency || profile.salaryCurrency || 'USD')}+ / year
                 </span>
               </div>
               <input
                 id="bp-salary"
                 type="range"
-                min={130}
-                max={260}
-                step={5}
+                min={0}
+                max={salaryCeiling(blueprint.salaryCurrency || profile.salaryCurrency)}
+                step={salaryCeiling(blueprint.salaryCurrency || profile.salaryCurrency) > 1000 ? 100 : 5}
                 value={blueprint.minSalaryK}
                 onChange={(e) =>
                   onUpdateBlueprint({
                     ...blueprint,
                     minSalaryK: Number(e.target.value),
-                    compensationExpectation: `$${e.target.value}k+ base salary + equity & full benefits`,
+                    compensationExpectation: `${blueprint.salaryCurrency || profile.salaryCurrency || 'USD'} ${Number(e.target.value)*1000}+ annual base salary; benefits and equity considered separately`,
                   })
                 }
                 className="w-full accent-slate-900 cursor-pointer mb-1.5"
@@ -701,6 +786,7 @@ export const CareerHubView: React.FC<CareerHubViewProps> = ({
                 }
                 className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-md"
               />
+              <p className="mt-1 text-[10px] text-slate-500">Set the lowest annual base pay you’d consider. Currency and market follow your location settings.</p>
             </div>
 
             <div>

@@ -20,6 +20,10 @@ export interface ConsultationBlueprint {
   progressionGoal: string;
   compensationExpectation: string;
   minSalaryK: number;
+  preferredCountry?: string;
+  homeLocation?: string;
+  salaryCurrency?: string;
+  timeZone?: string;
   preferredWorkModes: WorkMode[];
   recommendedRoles: string[];
   consultantSummary: string;
@@ -49,6 +53,7 @@ export interface JobListing {
   postedHoursAgo: number;
   salaryMinK: number;
   salaryMaxK: number;
+  salaryCurrency?: string;
   equity?: string;
   requiredSkills: string[];
   preferredSkills: string[];
@@ -72,6 +77,7 @@ export interface JobMatchBreakdown {
   skillScore: number;
   salaryScore: number;
   workModeScore: number;
+  commuteScore: number;
   mutualFitScore: number;
   matchedSkills: string[];
   missingSkills: string[];
@@ -90,6 +96,10 @@ export interface CandidateProfile {
   skills: string[];
   targetRoles: string[];
   minSalaryK: number;
+  preferredCountry?: string;
+  homeLocation?: string;
+  salaryCurrency?: string;
+  timeZone?: string;
   preferredWorkModes: WorkMode[];
   preferredLocations: string[];
   bioSummary: string;
@@ -98,8 +108,17 @@ export interface CandidateProfile {
   baseResumeFileName: string;
   linkedInUrl: string;
   linkedInSummary: string;
+  personalityNotes?: string;
+  agentInstructions?: string;
   profileAnalyzedAt?: string;
   consultationBlueprint: ConsultationBlueprint;
+}
+
+export interface AgentMemory {
+  semantic: string;
+  episodic: Array<{ id: string; at: string; summary: string }>;
+  procedural: string[];
+  reflectedAt?: string;
 }
 
 export interface FilterState {
@@ -120,9 +139,9 @@ export interface ApplicationRecord {
   notes: string;
   tailoredResumeDraft?: string;
   coverLetterDraft?: string;
+  fitRationale?: string;
+  nextStepCustomized?: boolean;
   autoTrackedByAgent?: boolean;
-  autoAppliedByAgent?: boolean;
-  confirmationId?: string;
   agentPipelineLog?: string[];
 }
 

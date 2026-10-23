@@ -94,7 +94,7 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 mb-6 border-b border-slate-200">
         <div>
           <p className="text-xs text-slate-500 mb-1">
-            Automated Career Pipeline · Tailored Resumes, Cover Letters & Auto-Apply Receipts
+            Saved roles, application stages, and prepared documents
           </p>
           <h1 className="text-2xl font-bold text-slate-900 font-display">
             Application Tracker
@@ -128,7 +128,7 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
           </p>
         </div>
         <div className="p-4 bg-white border border-slate-200 rounded-lg">
-          <p className="text-xs text-slate-500">Applied (Auto & Manual)</p>
+          <p className="text-xs text-slate-500">Applied (user confirmed)</p>
           <p className="text-2xl font-bold text-slate-900 font-mono tabular-nums mt-1">
             {metrics.appliedCount}
           </p>
@@ -254,17 +254,12 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
                       <div className="text-slate-500 mt-0.5">
                         {job.company} · {job.location}
                       </div>
-                      {record.confirmationId && (
-                        <div className="font-mono tabular-nums text-[11px] text-emerald-700 mt-0.5">
-                          Auto-Applied · #{record.confirmationId}
-                        </div>
-                      )}
                     </td>
                     <td className="py-3.5 px-4 text-slate-600 whitespace-nowrap">
                       {job.source} · {job.workMode}
                     </td>
                     <td className="py-3.5 px-4 text-right font-mono tabular-nums text-slate-900 whitespace-nowrap">
-                      {formatSalaryRange(job.salaryMinK, job.salaryMaxK)}
+                      {formatSalaryRange(job.salaryMinK, job.salaryMaxK, job.salaryCurrency || 'USD')}
                     </td>
                     <td className="py-3.5 px-4 text-right font-mono tabular-nums font-semibold text-emerald-700 whitespace-nowrap">
                       {job.match.overallScore}%
@@ -285,7 +280,7 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
                         className="px-2.5 py-1 text-xs font-medium bg-slate-50 border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900"
                       >
                         <option value="Saved">Saved</option>
-                        <option value="Applied">Applied</option>
+                        {record.status === 'Applied' && <option value="Applied" disabled>Applied</option>}
                         <option value="Interviewing">Interviewing</option>
                         <option value="Offer">Offer</option>
                         <option value="Archived">Archived</option>
@@ -365,8 +360,9 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
                           className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors whitespace-nowrap shrink-0"
                         >
                           <FileText className="w-3.5 h-3.5" />
-                          <span>Tailor & Auto-Apply</span>
+                          <span>Tailor & Prepare</span>
                         </button>
+                        {record.status === 'Saved' && <button type="button" onClick={() => onUpdateStatus(job.id, 'Applied')} className="rounded border px-2.5 py-1 text-xs">I submitted this</button>}
                         <a
                           href={job.sourceUrl}
                           target="_blank"

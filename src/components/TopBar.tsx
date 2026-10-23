@@ -13,6 +13,10 @@ interface TopBarProps {
   onRunAgentScan: () => void;
   isScanning: boolean;
   trackedCount: number;
+  onOpenAgentControls: () => void;
+  onToggleEmergencyStop: () => void;
+  agentsStopped: boolean;
+  activeAgentCount: number;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -21,6 +25,10 @@ export const TopBar: React.FC<TopBarProps> = ({
   onRunAgentScan,
   isScanning,
   trackedCount,
+  onOpenAgentControls,
+  onToggleEmergencyStop,
+  agentsStopped,
+  activeAgentCount,
 }) => {
   const navItems: { id: ActiveTab; label: string }[] = [
     { id: 'careerhub', label: 'CareerHub' },
@@ -69,13 +77,18 @@ export const TopBar: React.FC<TopBarProps> = ({
       </nav>
 
       {/* Zone 3: 1 primary action */}
-      <div className="flex items-center shrink-0">
+      <div className="flex items-center gap-2 shrink-0">
+        <button type="button" onClick={onOpenAgentControls} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+          Agent Controls{activeAgentCount > 0 ? ` · ${activeAgentCount} active` : ''}
+        </button>
         <button
           type="button"
-          onClick={onRunAgentScan}
-          disabled={isScanning}
-          className="px-3 sm:px-4 py-2 text-xs font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+          onClick={onToggleEmergencyStop}
+          className={`px-3 py-2 text-xs font-semibold text-white rounded-lg whitespace-nowrap ${agentsStopped ? 'bg-emerald-700 hover:bg-emerald-800' : 'bg-red-700 hover:bg-red-800'}`}
         >
+          {agentsStopped ? 'Resume Agents' : 'Emergency Stop'}
+        </button>
+        <button type="button" onClick={onRunAgentScan} disabled={isScanning || agentsStopped} className="px-3 sm:px-4 py-2 text-xs font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900">
           {isScanning ? 'Scanning Job Boards...' : 'Run Agent Scan'}
         </button>
       </div>
